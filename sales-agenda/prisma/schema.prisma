@@ -1,0 +1,472 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  REGIONAL_MANAGER
+  MANAGER
+  AGENT
+  SECRETARY
+}
+
+enum MembershipStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
+enum ContactStatus {
+  NEW
+  IN_PROGRESS
+  QUALIFIED
+  CLOSED
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELED
+  NO_SHOW
+}
+
+enum SaleStatus {
+  FUTURE
+  CLOSED
+  CANCELED
+}
+
+enum GoalPeriod {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum GoalProgressStatus {
+  ON_TRACK
+  AT_RISK
+  ACHIEVED
+}
+
+enum RecommendationEventStatus {
+  SHOWN
+  ACCEPTED
+  DISMISSED
+  COMPLETED
+}
+
+model Tenant {
+  id                  String               @id @default(uuid())
+  name                String
+  slug                String               @unique
+  plan                String               @default("pro")
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  memberships         Membership[]
+  contacts            Contact[]
+  appointments        Appointment[]
+  sales               Sale[]
+  tasks               Task[]
+  reminders           Reminder[]
+  rubkleyFrameworks   RubkleyFramework[]
+  goalProgress        GoalProgress[]
+  trophyAwards        TrophyAward[]
+  recommendationEvents RecommendationEvent[]
+}
+
+model User {
+  id                   String                @id @default(uuid())
+  email                String                @unique
+  name                 String
+  passwordHash         String?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  memberships          Membership[]
+  reports              Membership[]          @relation("MembershipReportsTo")
+  createdContacts      Contact[]             @relation("CreatedContacts")
+  createdAppointments  Appointment[]         @relation("CreatedAppointments")
+  createdSales         Sale[]                @relation("CreatedSales")
+  assignedTasks        Task[]                @relation("TaskAssignee")
+  createdTasks         Task[]                @relation("TaskCreator")
+  stageChanges         ContactStageHistory[] @relation("StageChangedBy")
+  goalProgress         GoalProgress[]
+  trophyAwards         TrophyAward[]
+  recommendationEvents RecommendationEvent[]
+}
+
+model Membership {
+  id              String           @id @default(uuid())
+  tenantId        String
+  userId          String
+  role            Role
+  status          MembershipStatus @default(ACTIVE)
+  reportsToUserId String?
+  createdAt       DateTime         @default(now())
+
+  tenant     Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reportsTo  User?  @relation("MembershipReportsTo", fields: [reportsToUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, userId], name: "tenantId_userId")
+  @@index([tenantId, role])
+  @@index([tenantId, reportsToUserId])
+}
+
+model Contact {
+  id              String            @id @default(uuid())
+  tenantId        String
+  createdById     String
+  assignedAgentId String?
+  stageId         String?
+
+  name      String
+  company   String?
+  phone     String?
+  email     String?
+  address   String?
+  notes     String?
+  photoUrl  String?
+  status    ContactStatus @default(NEW)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  tenant     Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy  User          @relation("CreatedContacts", fields: [createdById], references: [id], onDelete: Restrict)
+  stage      PipelineStage? @relation(fields: [stageId], references: [id], onDelete: SetNull)
+
+  appointments Appointment[]
+  sales        Sale[]
+  reminders    Reminder[]
+  stageHistory ContactStageHistory[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, assignedAgentId])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, stageId])
+}
+
+model Appointment {
+  id          String            @id @default(uuid())
+  tenantId    String
+  contactId   String
+  agentId     String?
+  createdById String
+
+  startsAt DateTime
+  endsAt   DateTime?
+  notes    String?
+  status   AppointmentStatus @default(SCHEDULED)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  tenant     Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact    Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  createdBy  User    @relation("CreatedAppointments", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, startsAt])
+  @@index([tenantId, agentId, startsAt])
+}
+
+model Sale {
+  id          String      @id @default(uuid())
+  tenantId    String
+  contactId   String
+  agentId     String?
+  createdById String
+
+  title  String?
+  status SaleStatus @default(FUTURE)
+
+  profitCents Int
+  currency    String   @default("USD")
+
+  saleDate DateTime
+  notes    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  createdBy User    @relation("CreatedSales", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, saleDate])
+  @@index([tenantId, agentId, saleDate])
+  @@index([tenantId, status])
+}
+
+model Task {
+  id             String   @id @default(uuid())
+  tenantId       String
+  title          String
+  notes          String?
+  assignedToId   String
+  createdById    String
+  dueAt          DateTime?
+  createdAt      DateTime @default(now())
+
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignedTo     User     @relation("TaskAssignee", fields: [assignedToId], references: [id], onDelete: Cascade)
+  createdBy      User     @relation("TaskCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, assignedToId, createdAt])
+}
+
+model Reminder {
+  id          String   @id @default(uuid())
+  tenantId    String
+  contactId   String
+  message     String
+  channel     String   @default("placeholder")
+  createdById String
+  createdAt   DateTime @default(now())
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact     Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+}
+
+model RubkleyFramework {
+  id        String    @id @default(uuid())
+  tenantId  String
+  name      String
+  version   String
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+
+  tenant               Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  stages               PipelineStage[]
+  playbooks            Playbook[]
+  kpiSets              KpiSet[]
+  goalDefinitions      GoalDefinition[]
+  trophyDefinitions    TrophyDefinition[]
+  recommendationRules  RecommendationRule[]
+
+  @@index([tenantId, isActive])
+}
+
+model PipelineStage {
+  id          String   @id @default(uuid())
+  frameworkId String
+  tenantId    String
+  key         String
+  name        String
+  order       Int
+  isTerminal  Boolean @default(false)
+  colorToken  String?
+
+  framework RubkleyFramework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  gates     StageGate[]
+  contacts  Contact[]
+  plays     PlayDefinition[]
+  historyFrom ContactStageHistory[] @relation("HistoryFromStage")
+  historyTo   ContactStageHistory[] @relation("HistoryToStage")
+
+  @@unique([frameworkId, key])
+  @@index([tenantId, order])
+}
+
+model StageGate {
+  id        String @id @default(uuid())
+  stageId   String
+  tenantId  String
+  order     Int
+  ruleJson  Json
+  message   String
+
+  stage     PipelineStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, stageId, order])
+}
+
+model Playbook {
+  id          String @id @default(uuid())
+  frameworkId String
+  tenantId    String
+  role        Role
+  name        String
+  isActive    Boolean @default(true)
+
+  framework RubkleyFramework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  plays     PlayDefinition[]
+
+  @@index([tenantId, role, isActive])
+}
+
+model PlayDefinition {
+  id            String  @id @default(uuid())
+  playbookId     String
+  stageId        String?
+  tenantId       String
+  order          Int
+  name           String
+  intent         String
+  checklistJson  Json
+  templatesJson  Json?
+
+  playbook Playbook @relation(fields: [playbookId], references: [id], onDelete: Cascade)
+  stage    PipelineStage? @relation(fields: [stageId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, playbookId, order])
+  @@index([tenantId, stageId])
+}
+
+model KpiSet {
+  id          String @id @default(uuid())
+  frameworkId String
+  tenantId    String
+  role        Role
+  name        String
+  isActive    Boolean @default(true)
+
+  framework RubkleyFramework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  metrics   KpiMetricDefinition[]
+
+  @@index([tenantId, role, isActive])
+}
+
+model KpiMetricDefinition {
+  id            String  @id @default(uuid())
+  kpiSetId      String
+  tenantId      String
+  key           String
+  name          String
+  unit          String
+  weight        Float
+  defaultTarget Float?
+
+  kpiSet KpiSet @relation(fields: [kpiSetId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, kpiSetId])
+  @@index([tenantId, key])
+}
+
+model GoalDefinition {
+  id          String     @id @default(uuid())
+  frameworkId String
+  tenantId    String
+  role        Role
+  period      GoalPeriod
+  metricKey   String
+  targetValue Float
+  isActive    Boolean    @default(true)
+
+  framework RubkleyFramework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, role, period, isActive])
+}
+
+model GoalProgress {
+  id          String             @id @default(uuid())
+  tenantId    String
+  userId      String
+  dateBucket  DateTime
+  period      GoalPeriod
+  metricKey   String
+  targetValue Float
+  actualValue Float
+  status      GoalProgressStatus @default(ON_TRACK)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, userId, dateBucket])
+  @@unique([tenantId, userId, dateBucket, period, metricKey])
+}
+
+model TrophyDefinition {
+  id          String @id @default(uuid())
+  frameworkId String
+  tenantId    String
+  name        String
+  description String
+  icon        String?
+  ruleJson    Json
+  isActive    Boolean @default(true)
+
+  framework RubkleyFramework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  awards    TrophyAward[]
+
+  @@index([tenantId, isActive])
+}
+
+model TrophyAward {
+  id          String   @id @default(uuid())
+  tenantId    String
+  userId      String
+  trophyId    String
+  awardedAt   DateTime @default(now())
+  contextJson Json?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trophy TrophyDefinition @relation(fields: [trophyId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId, trophyId])
+  @@index([tenantId, userId, awardedAt])
+}
+
+model RecommendationRule {
+  id            String @id @default(uuid())
+  frameworkId   String
+  tenantId      String
+  role          Role
+  priority      Int
+  conditionJson Json
+  actionJson    Json
+  isActive      Boolean @default(true)
+
+  framework RubkleyFramework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  events    RecommendationEvent[]
+
+  @@index([tenantId, role, isActive, priority])
+}
+
+model RecommendationEvent {
+  id         String                    @id @default(uuid())
+  tenantId   String
+  userId     String
+  dateBucket DateTime
+  ruleId     String
+  actionJson Json
+  status     RecommendationEventStatus @default(SHOWN)
+  createdAt  DateTime                  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rule   RecommendationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, userId, dateBucket, status])
+}
+
+model ContactStageHistory {
+  id              String   @id @default(uuid())
+  tenantId        String
+  contactId       String
+  fromStageId     String?
+  toStageId       String
+  changedByUserId String
+  changedAt       DateTime @default(now())
+  reasonJson      Json?
+
+  contact   Contact       @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  fromStage PipelineStage? @relation("HistoryFromStage", fields: [fromStageId], references: [id], onDelete: SetNull)
+  toStage   PipelineStage  @relation("HistoryToStage", fields: [toStageId], references: [id], onDelete: Cascade)
+  changedBy User           @relation("StageChangedBy", fields: [changedByUserId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, contactId, changedAt])
+}
